@@ -4,12 +4,10 @@ use vfs_tar::TarFS;
 
 #[test]
 fn basic() {
-    let mut file = tempfile().unwrap();
-    {
-        let mut archive = tar_rs::Builder::new(&mut file);
-        archive.append_dir_all("src", "src").unwrap();
-        archive.finish().unwrap();
-    }
+    let file = tempfile().unwrap();
+    let mut archive = tar_rs::Builder::new(file);
+    archive.append_dir_all("src", "src").unwrap();
+    let file = archive.into_inner().unwrap();
 
     let fs = TarFS::from_std_file(&file).unwrap();
     let root = VfsPath::from(fs);
