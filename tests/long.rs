@@ -3,26 +3,19 @@ use vfs::VfsPath;
 use vfs_tar::TarFS;
 
 #[test]
-fn basic() {
+fn long() {
+    let name = "a".repeat(1024);
+
     let file = tempfile().unwrap();
     let mut archive = tar_rs::Builder::new(file);
-    archive.append_dir_all("src", "src").unwrap();
+    archive.append_path_with_name("src/lib.rs", &name).unwrap();
     let file = archive.into_inner().unwrap();
 
     let fs = TarFS::from_std_file(&file).unwrap();
     let root = VfsPath::from(fs);
-    let mut files = root
-        .join("src")
-        .unwrap()
-        .read_dir()
-        .unwrap()
-        .map(|p| p.filename())
-        .collect::<Vec<_>>();
-    files.sort();
-    assert_eq!(&files, &["lib.rs", "parser.rs"]);
 
     let mut buffer = String::new();
-    root.join("src/lib.rs")
+    root.join(name)
         .unwrap()
         .open_file()
         .unwrap()

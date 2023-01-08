@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 memmap2 = "0.5"
-tar-parser = { git = "https://github.com/nickelc/tar-parser.rs.git", branch = "modernize" }
 vfs = "0.9"
+nom = "7"
 
 [dev-dependencies]
 tar-rs = { version = "0.4", package = "tar" }

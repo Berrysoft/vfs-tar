@@ -2,15 +2,18 @@
 
 #![warn(missing_docs)]
 
+mod parser;
+
 use memmap2::{Mmap, MmapOptions};
+use parser::*;
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fs::File,
     io::{Cursor, Write},
     ops::Deref,
     path::{Iter, Path},
 };
-use tar::{parse_tar, TarEntry, TypeFlag};
 use vfs::{error::VfsErrorKind, *};
 
 /// A readonly tar archive filesystem.
@@ -132,7 +135,7 @@ enum EntryRef<'a> {
     Directory(&'a DirTree),
 }
 
-type DirTree = HashMap<&'static str, Entry>;
+type DirTree = HashMap<String, Entry>;
 
 #[derive(Debug, Default)]
 struct DirTreeBuilder {
@@ -141,27 +144,52 @@ struct DirTreeBuilder {
 
 impl DirTreeBuilder {
     pub fn build(mut self, entries: &[TarEntry<'static>]) -> DirTree {
+        let mut longname = None;
         for entry in entries {
+            let name = longname
+                .take()
+                .unwrap_or_else(|| Self::get_full_name(entry));
             match entry.header.typeflag {
                 TypeFlag::Directory => {
-                    self.insert_dir(Path::new(entry.header.name));
+                    self.insert_dir(Path::new(name.deref()));
                 }
-                TypeFlag::NormalFile => self.insert_file(
-                    Path::new(entry.header.name),
+                TypeFlag::NormalFile | TypeFlag::ContiguousFile => self.insert_file(
+                    Path::new(name.deref()),
                     &entry.contents[..entry.header.size as usize],
                 ),
-                _ => unimplemented!(),
+                TypeFlag::GNULongName => {
+                    debug_assert!(longname.is_none());
+                    debug_assert!(entry.header.size > 1);
+                    // SAFETY: TAR should be UTF-8
+                    longname = Some(Cow::Borrowed(unsafe {
+                        std::str::from_utf8_unchecked(
+                            &entry.contents[..entry.header.size as usize - 1],
+                        )
+                    }));
+                }
+                _ => {}
             }
         }
         self.root
     }
 
-    fn insert_dir(&mut self, path: &'static Path) -> &mut DirTree {
+    fn get_full_name(entry: &TarEntry<'static>) -> Cow<'static, str> {
+        if let ExtraHeader::UStar(ustar) = &entry.header.ustar {
+            if let UStarExtraHeader::Posix(header) = &ustar.extra {
+                if !header.prefix.is_empty() {
+                    return Cow::Owned(format!("{}/{}", header.prefix, entry.header.name));
+                }
+            }
+        };
+        Cow::Borrowed(entry.header.name)
+    }
+
+    fn insert_dir(&mut self, path: &Path) -> &mut DirTree {
         let path = path.iter();
         let mut current = &mut self.root;
         for p in path {
             let entry = current
-                .entry(p.to_str().unwrap())
+                .entry(p.to_string_lossy().into_owned())
                 .or_insert_with(|| Entry::Directory(DirTree::new()));
             current = if let Entry::Directory(dir) = entry {
                 dir
@@ -172,10 +200,14 @@ impl DirTreeBuilder {
         current
     }
 
-    fn insert_file(&mut self, path: &'static Path, buf: &'static [u8]) {
-        let current = self.insert_dir(path.parent().unwrap());
+    fn insert_file(&mut self, path: &Path, buf: &'static [u8]) {
+        let current = if let Some(parent) = path.parent() {
+            self.insert_dir(parent)
+        } else {
+            &mut self.root
+        };
         current.insert(
-            path.file_name().unwrap().to_str().unwrap(),
+            path.file_name().unwrap().to_string_lossy().into_owned(),
             Entry::File(buf),
         );
     }
