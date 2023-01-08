@@ -18,12 +18,12 @@ pub struct TarFS {
 
 impl TarFS {
     pub fn new(p: impl AsRef<Path>) -> VfsResult<Self> {
-        Self::from_std_file(File::open(p)?)
+        Self::from_std_file(&File::open(p)?)
     }
 
-    pub fn from_std_file(f: File) -> VfsResult<Self> {
+    pub fn from_std_file(f: &File) -> VfsResult<Self> {
         // SAFETY: mmap with COW
-        let file = unsafe { MmapOptions::new().map_copy_read_only(&f) }?;
+        let file = unsafe { MmapOptions::new().map_copy_read_only(f) }?;
         // SAFETY: the entries won't live longer than mmap
         let (_, entries) = parse_tar(unsafe { &*(file.deref() as *const [u8]) })
             .map_err(|e| VfsErrorKind::Other(e.to_string()))?;
@@ -32,7 +32,7 @@ impl TarFS {
     }
 
     fn find_entry(&self, path: &str) -> Option<EntryRef> {
-        Self::find_entry_impl(&self.root, Path::new(path).iter())
+        Self::find_entry_impl(&self.root, strip_path(path).iter())
     }
 
     fn find_entry_impl<'a>(dir: &'a DirTree, mut path: Iter) -> Option<EntryRef<'a>> {
@@ -171,4 +171,8 @@ impl DirTreeBuilder {
             Entry::File(buf),
         );
     }
+}
+
+fn strip_path(path: &str) -> &Path {
+    Path::new(path.strip_prefix('/').unwrap_or(path))
 }
