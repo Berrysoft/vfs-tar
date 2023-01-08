@@ -1,3 +1,7 @@
+//! This is a bridge of [`vfs`] and TAR files.
+
+#![warn(missing_docs)]
+
 use memmap2::{Mmap, MmapOptions};
 use std::{
     collections::HashMap,
@@ -9,6 +13,7 @@ use std::{
 use tar::{parse_tar, TarEntry, TypeFlag};
 use vfs::{error::VfsErrorKind, *};
 
+/// A readonly tar archive filesystem.
 #[derive(Debug)]
 pub struct TarFS {
     #[allow(dead_code)]
@@ -17,10 +22,13 @@ pub struct TarFS {
 }
 
 impl TarFS {
+    /// Create [`TarFS`] from the archive path.
     pub fn new(p: impl AsRef<Path>) -> VfsResult<Self> {
         Self::from_std_file(&File::open(p)?)
     }
 
+    /// Create [`TarFS`] from [`File`].
+    /// Note that the filesystem is still valid after the [`File`] being dropped.
     pub fn from_std_file(f: &File) -> VfsResult<Self> {
         // SAFETY: mmap with COW
         let file = unsafe { MmapOptions::new().map_copy_read_only(f) }?;
@@ -173,6 +181,7 @@ impl DirTreeBuilder {
     }
 }
 
+/// [`Path`] doesn't iterate well with the prefix `/`.
 fn strip_path(path: &str) -> &Path {
     Path::new(path.strip_prefix('/').unwrap_or(path))
 }
