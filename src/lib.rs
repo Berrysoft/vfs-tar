@@ -159,19 +159,22 @@ impl DirTreeBuilder {
                     &entry.contents[..realsize.take().unwrap_or(entry.header.size) as usize],
                 ),
                 TypeFlag::GnuLongName => {
-                    debug_assert!(longname.is_none());
                     debug_assert!(entry.header.size > 1);
-                    longname = Some(Cow::Borrowed(parse_long_name(entry.contents).unwrap().1));
-                }
-                TypeFlag::Pax => {
-                    let pax = parse_pax(entry.contents).unwrap().1;
-                    if let Some(name) = pax.get("path") {
+                    if let Ok((_, name)) = parse_long_name(entry.contents) {
                         debug_assert!(longname.is_none());
                         longname = Some(Cow::Borrowed(name));
                     }
-                    if let Some(size) = pax.get("size") {
-                        debug_assert!(realsize.is_none());
-                        realsize = size.parse().ok();
+                }
+                TypeFlag::Pax => {
+                    if let Ok((_, pax)) = parse_pax(entry.contents) {
+                        if let Some(name) = pax.get("path") {
+                            debug_assert!(longname.is_none());
+                            longname = Some(Cow::Borrowed(name));
+                        }
+                        if let Some(size) = pax.get("size") {
+                            debug_assert!(realsize.is_none());
+                            realsize = size.parse().ok();
+                        }
                     }
                 }
                 _ => {}
@@ -213,10 +216,9 @@ impl DirTreeBuilder {
         } else {
             &mut self.root
         };
-        current.insert(
-            path.file_name().unwrap().to_string_lossy().into_owned(),
-            Entry::File(buf),
-        );
+        if let Some(filename) = path.file_name() {
+            current.insert(filename.to_string_lossy().into_owned(), Entry::File(buf));
+        }
     }
 }
 
