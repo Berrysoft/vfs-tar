@@ -51,8 +51,15 @@ impl TarFS {
         self.file
     }
 
-    fn find_entry(&self, path: &str) -> Option<EntryRef> {
-        Self::find_entry_impl(&self.root, strip_path(path).iter())
+    fn find_entry(&self, mut path: &str) -> Option<EntryRef> {
+        loop {
+            let res = Self::find_entry_impl(&self.root, strip_path(path).iter());
+            if let Some(EntryRef::Link(p)) = res {
+                path = p;
+            } else {
+                return res;
+            }
+        }
     }
 
     fn find_entry_impl<'a>(dir: &'a DirTree, mut path: Iter) -> Option<EntryRef<'a>> {
@@ -62,8 +69,15 @@ impl TarFS {
         };
         if let Some(entry) = dir.get(next_path.as_ref()) {
             match entry {
-                Entry::File(buf) => Some(EntryRef::File(buf)),
+                Entry::File(buf) => {
+                    debug_assert!(path.next().is_none());
+                    Some(EntryRef::File(buf))
+                }
                 Entry::Directory(dir) => Self::find_entry_impl(dir, path),
+                Entry::Link(p) => {
+                    debug_assert!(path.next().is_none());
+                    Some(EntryRef::Link(p))
+                }
             }
         } else {
             None
@@ -114,6 +128,7 @@ impl FileSystem for TarFS {
                     file_type: VfsFileType::Directory,
                     len: 0,
                 }),
+                EntryRef::Link(_) => unreachable!(),
             },
             None => Err(VfsErrorKind::FileNotFound.into()),
         }
@@ -136,12 +151,14 @@ impl FileSystem for TarFS {
 enum Entry {
     File(&'static [u8]),
     Directory(DirTree),
+    Link(&'static str),
 }
 
 #[derive(Debug)]
 enum EntryRef<'a> {
     File(&'static [u8]),
     Directory(&'a DirTree),
+    Link(&'static str),
 }
 
 type DirTree = HashMap<String, Entry>;
@@ -149,40 +166,56 @@ type DirTree = HashMap<String, Entry>;
 #[derive(Debug, Default)]
 struct DirTreeBuilder {
     root: DirTree,
+    longname: Option<Cow<'static, str>>,
+    longlink: Option<&'static str>,
+    realsize: Option<u64>,
 }
 
 impl DirTreeBuilder {
     pub fn build(mut self, entries: &[TarEntry<'static>]) -> DirTree {
-        let mut longname = None;
-        let mut realsize = None;
         for entry in entries {
-            let name = longname
-                .take()
-                .unwrap_or_else(|| Self::get_full_name(entry));
             match entry.header.typeflag {
                 TypeFlag::Directory | TypeFlag::GnuDirectory => {
+                    let name = self.get_name(entry);
                     self.insert_dir(Path::new(name.deref()));
                 }
-                TypeFlag::NormalFile | TypeFlag::ContiguousFile => self.insert_file(
-                    Path::new(name.deref()),
-                    &entry.contents[..realsize.take().unwrap_or(entry.header.size) as usize],
-                ),
+                TypeFlag::NormalFile | TypeFlag::ContiguousFile => {
+                    let name = self.get_name(entry);
+                    let size = self.realsize.take().unwrap_or(entry.header.size) as usize;
+                    self.insert_file(Path::new(name.deref()), &entry.contents[..size])
+                }
+                TypeFlag::HardLink | TypeFlag::SymbolicLink => {
+                    let name = self.get_name(entry);
+                    let target = self.longlink.take().unwrap_or(entry.header.linkname);
+                    self.insert_link(Path::new(name.deref()), target)
+                }
                 TypeFlag::GnuLongName => {
                     debug_assert!(entry.header.size > 1);
                     if let Ok((_, name)) = parse_long_name(entry.contents) {
-                        debug_assert!(longname.is_none());
-                        longname = Some(Cow::Borrowed(name));
+                        debug_assert!(self.longname.is_none());
+                        self.longname = Some(Cow::Borrowed(name));
+                    }
+                }
+                TypeFlag::GnuLongLink => {
+                    debug_assert!(entry.header.size > 1);
+                    if let Ok((_, target)) = parse_long_name(entry.contents) {
+                        debug_assert!(self.longlink.is_none());
+                        self.longlink = Some(target);
                     }
                 }
                 TypeFlag::Pax => {
                     if let Ok((_, pax)) = parse_pax(entry.contents) {
                         if let Some(name) = pax.get("path") {
-                            debug_assert!(longname.is_none());
-                            longname = Some(Cow::Borrowed(name));
+                            debug_assert!(self.longname.is_none());
+                            self.longname = Some(Cow::Borrowed(name));
+                        }
+                        if let Some(target) = pax.get("linkpath") {
+                            debug_assert!(self.longlink.is_none());
+                            self.longlink = Some(target);
                         }
                         if let Some(size) = pax.get("size") {
-                            debug_assert!(realsize.is_none());
-                            realsize = size.parse().ok();
+                            debug_assert!(self.realsize.is_none());
+                            self.realsize = size.parse().ok();
                         }
                     }
                 }
@@ -190,6 +223,12 @@ impl DirTreeBuilder {
             }
         }
         self.root
+    }
+
+    fn get_name(&mut self, entry: &TarEntry<'static>) -> Cow<'static, str> {
+        self.longname
+            .take()
+            .unwrap_or_else(|| Self::get_full_name(entry))
     }
 
     fn get_full_name(entry: &TarEntry<'static>) -> Cow<'static, str> {
@@ -227,6 +266,17 @@ impl DirTreeBuilder {
         };
         if let Some(filename) = path.file_name() {
             current.insert(filename.to_string_lossy().into_owned(), Entry::File(buf));
+        }
+    }
+
+    fn insert_link(&mut self, path: &Path, target: &'static str) {
+        let current = if let Some(parent) = path.parent() {
+            self.insert_dir(parent)
+        } else {
+            &mut self.root
+        };
+        if let Some(filename) = path.file_name() {
+            current.insert(filename.to_string_lossy().into_owned(), Entry::Link(target));
         }
     }
 }
@@ -286,6 +336,35 @@ mod test {
 
         let mut buffer = String::new();
         root.join(name)
+            .unwrap()
+            .open_file()
+            .unwrap()
+            .read_to_string(&mut buffer)
+            .unwrap();
+        let real_content = std::fs::read_to_string("src/lib.rs").unwrap();
+        assert_eq!(buffer, real_content);
+    }
+
+    #[test]
+    fn link() {
+        let name = "a".repeat(1024);
+        let link_name = "b".repeat(1024);
+
+        let file = tempfile().unwrap();
+        let mut archive = tar_rs::Builder::new(file);
+        archive.append_path_with_name("src/lib.rs", &name).unwrap();
+        {
+            let mut header = tar_rs::Header::new_gnu();
+            header.set_entry_type(tar_rs::EntryType::Symlink);
+            archive.append_link(&mut header, &link_name, &name).unwrap();
+        }
+        let file = archive.into_inner().unwrap();
+
+        let fs = TarFS::from_std_file(&file).unwrap();
+        let root = VfsPath::from(fs);
+
+        let mut buffer = String::new();
+        root.join(link_name)
             .unwrap()
             .open_file()
             .unwrap()
