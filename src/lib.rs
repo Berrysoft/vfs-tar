@@ -373,4 +373,39 @@ mod test {
         let real_content = std::fs::read_to_string("src/lib.rs").unwrap();
         assert_eq!(buffer, real_content);
     }
+
+    #[test]
+    fn ustar() {
+        let name = format!("{}/{}", "a".repeat(80), "b".repeat(80));
+        let link_name = format!("{}/{}", "c".repeat(80), "d".repeat(80));
+
+        let file = tempfile().unwrap();
+        let mut archive = tar_rs::Builder::new(file);
+        {
+            let mut header = tar_rs::Header::new_ustar();
+            let file = std::fs::File::open("src/lib.rs").unwrap();
+            let size = file.metadata().unwrap().len();
+            header.set_size(size);
+            archive.append_data(&mut header, &name, file).unwrap();
+        }
+        {
+            let mut header = tar_rs::Header::new_ustar();
+            header.set_entry_type(tar_rs::EntryType::Symlink);
+            archive.append_link(&mut header, &link_name, &name).unwrap();
+        }
+        let file = archive.into_inner().unwrap();
+
+        let fs = TarFS::from_std_file(&file).unwrap();
+        let root = VfsPath::from(fs);
+
+        let mut buffer = String::new();
+        root.join(link_name)
+            .unwrap()
+            .open_file()
+            .unwrap()
+            .read_to_string(&mut buffer)
+            .unwrap();
+        let real_content = std::fs::read_to_string("src/lib.rs").unwrap();
+        assert_eq!(buffer, real_content);
+    }
 }
