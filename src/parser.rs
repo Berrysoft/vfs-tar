@@ -4,16 +4,13 @@
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take, take_until};
-use nom::character::complete::{oct_digit0, space0};
+use nom::character::complete::{digit1, oct_digit0, space0};
 use nom::combinator::{all_consuming, map, map_parser, map_res};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{pair, terminated};
 use nom::*;
-
-/*
- * Core structs
- */
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct TarEntry<'a> {
@@ -95,9 +92,6 @@ pub struct Sparse {
     pub offset: u64,
     pub numbytes: u64,
 }
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Padding;
 
 fn parse_bool(i: &[u8]) -> IResult<&[u8], bool> {
     map(take(1usize), |i: &[u8]| i[0] != 0)(i)
@@ -347,6 +341,31 @@ pub fn parse_tar(i: &[u8]) -> IResult<&[u8], Vec<TarEntry<'_>>> {
     all_consuming(entries)(i)
 }
 
+pub fn parse_long_name(i: &[u8]) -> IResult<&[u8], &str> {
+    parse_str(i.len())(i)
+}
+
+fn parse_pax_item(i: &[u8]) -> IResult<&[u8], (&str, &str)> {
+    let (i, len) = map_res(digit1, std::str::from_utf8)(i)?;
+    let (i, _) = tag(" ")(i)?;
+    let (i, key) = map_res(take_until("="), std::str::from_utf8)(i)?;
+    let (i, _) = tag("=")(i)?;
+    let (i, value) = map_res(take_until("\n"), std::str::from_utf8)(i)?;
+    let (i, _) = tag("\n")(i)?;
+    if let Ok(len_usize) = len.parse::<usize>() {
+        debug_assert_eq!(len_usize, len.len() + key.len() + value.len() + 3);
+    }
+    Ok((i, (key, value)))
+}
+
+pub fn parse_pax(i: &[u8]) -> IResult<&[u8], HashMap<&str, &str>> {
+    let items = fold_many0(parse_pax_item, HashMap::new, |mut map, (key, value)| {
+        map.insert(key, value);
+        map
+    });
+    all_consuming(items)(i)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +407,15 @@ mod tests {
         let s: &[u8] = b"foobar\0\0\0\0baz";
         let baz: &[u8] = b"baz";
         assert_eq!(parse_str(10)(s), Ok((baz, "foobar")));
+    }
+
+    #[test]
+    fn parse_pax_test() {
+        let item: &[u8] = b"25 ctime=1084839148.1212\nfoo";
+        let foo: &[u8] = b"foo";
+        assert_eq!(
+            parse_pax_item(item),
+            Ok((foo, ("ctime", "1084839148.1212")))
+        );
     }
 }

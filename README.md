@@ -5,5 +5,5 @@ Internally it uses [memmap2](https://lib.rs/crates/memmap2) and a modified versi
 ## To-do list
 - [x] Read-only file system.
 - [x] Handle GNU long name.
-- [ ] Handle PAX.
+- [x] Handle PAX.
 - [ ] Make file system writable(?)

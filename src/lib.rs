@@ -145,6 +145,7 @@ struct DirTreeBuilder {
 impl DirTreeBuilder {
     pub fn build(mut self, entries: &[TarEntry<'static>]) -> DirTree {
         let mut longname = None;
+        let mut realsize = None;
         for entry in entries {
             let name = longname
                 .take()
@@ -155,17 +156,23 @@ impl DirTreeBuilder {
                 }
                 TypeFlag::NormalFile | TypeFlag::ContiguousFile => self.insert_file(
                     Path::new(name.deref()),
-                    &entry.contents[..entry.header.size as usize],
+                    &entry.contents[..realsize.take().unwrap_or(entry.header.size) as usize],
                 ),
                 TypeFlag::GnuLongName => {
                     debug_assert!(longname.is_none());
                     debug_assert!(entry.header.size > 1);
-                    // SAFETY: TAR should be UTF-8
-                    longname = Some(Cow::Borrowed(unsafe {
-                        std::str::from_utf8_unchecked(
-                            &entry.contents[..entry.header.size as usize - 1],
-                        )
-                    }));
+                    longname = Some(Cow::Borrowed(parse_long_name(entry.contents).unwrap().1));
+                }
+                TypeFlag::Pax => {
+                    let pax = parse_pax(entry.contents).unwrap().1;
+                    if let Some(name) = pax.get("path") {
+                        debug_assert!(longname.is_none());
+                        longname = Some(Cow::Borrowed(name));
+                    }
+                    if let Some(size) = pax.get("size") {
+                        debug_assert!(realsize.is_none());
+                        realsize = size.parse().ok();
+                    }
                 }
                 _ => {}
             }
