@@ -63,8 +63,6 @@ pub enum ExtraHeader<'a> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct UStarHeader<'a> {
-    pub magic: &'a str,
-    pub version: &'a str,
     pub uname: &'a str,
     pub gname: &'a str,
     pub devmajor: u64,
@@ -75,7 +73,7 @@ pub struct UStarHeader<'a> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum UStarExtraHeader<'a> {
     Posix(PosixExtraHeader<'a>),
-    Gnu(GnuExtraHeader<'a>),
+    Gnu(GnuExtraHeader),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -84,13 +82,11 @@ pub struct PosixExtraHeader<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct GnuExtraHeader<'a> {
+pub struct GnuExtraHeader {
     pub atime: u64,
     pub ctime: u64,
     pub offset: u64,
-    pub longnames: &'a str,
     pub sparses: Vec<Sparse>,
-    pub isextended: bool,
     pub realsize: u64,
 }
 
@@ -125,7 +121,6 @@ macro_rules! impl_parse_str {
 }
 
 impl_parse_str! {
-    parse_str4, 4;
     parse_str8, 8;
     parse_str32, 32;
     parse_str100, 100;
@@ -230,17 +225,21 @@ fn parse_extra_sparses<'a, 'b>(
     }
 }
 
-/*
- * UStar GNU extended parsing
- */
+/// POSIX ustar extra header
+fn parse_extra_posix(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
+    let (i, prefix) = terminated(parse_str155, take(12usize))(i)?;
+    let header = UStarExtraHeader::Posix(PosixExtraHeader { prefix });
+    Ok((i, header))
+}
 
-fn parse_ustar00_extra_gnu(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
+/// GNU ustar extra header
+fn parse_extra_gnu(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
     let mut sparses = Vec::new();
 
     let (i, atime) = parse_octal12(i)?;
     let (i, ctime) = parse_octal12(i)?;
     let (i, offset) = parse_octal12(i)?;
-    let (i, longnames) = parse_str4(i)?;
+    let (i, _) = take(4usize)(i)?; // longnames
     let (i, _) = take(1usize)(i)?;
     let (i, sps) = parse_sparses(i, 4)?;
     let (i, isextended) = parse_bool(i)?;
@@ -253,84 +252,41 @@ fn parse_ustar00_extra_gnu(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
         atime,
         ctime,
         offset,
-        longnames,
         sparses,
-        isextended,
         realsize,
     };
     let header = UStarExtraHeader::Gnu(header);
     Ok((i, header))
 }
 
-/*
- * UStar Posix parsing
- */
+/// Ustar general parser
+fn parse_ustar(
+    magic: &'static str,
+    version: &'static str,
+    mut extra: impl FnMut(&[u8]) -> IResult<&[u8], UStarExtraHeader>,
+) -> impl FnMut(&[u8]) -> IResult<&[u8], ExtraHeader> {
+    move |input| {
+        let (i, _) = tag(magic)(input)?;
+        let (i, _) = tag(version)(i)?;
+        let (i, uname) = parse_str32(i)?;
+        let (i, gname) = parse_str32(i)?;
+        let (i, devmajor) = parse_octal8(i)?;
+        let (i, devminor) = parse_octal8(i)?;
+        let (i, extra) = extra(i)?;
 
-fn parse_ustar00_extra_posix(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
-    let (i, prefix) = terminated(parse_str155, take(12usize))(i)?;
-    let header = UStarExtraHeader::Posix(PosixExtraHeader { prefix });
-    Ok((i, header))
+        let header = ExtraHeader::UStar(UStarHeader {
+            uname,
+            gname,
+            devmajor,
+            devminor,
+            extra,
+        });
+        Ok((i, header))
+    }
 }
 
-fn parse_ustar00(i: &[u8]) -> IResult<&[u8], ExtraHeader<'_>> {
-    let (i, _) = tag("00")(i)?;
-    let (i, uname) = parse_str32(i)?;
-    let (i, gname) = parse_str32(i)?;
-    let (i, devmajor) = parse_octal8(i)?;
-    let (i, devminor) = parse_octal8(i)?;
-    let (i, extra) = parse_ustar00_extra_posix(i)?;
-
-    let header = ExtraHeader::UStar(UStarHeader {
-        magic: "ustar\0",
-        version: "00",
-        uname,
-        gname,
-        devmajor,
-        devminor,
-        extra,
-    });
-    Ok((i, header))
-}
-
-fn parse_ustar(input: &[u8]) -> IResult<&[u8], ExtraHeader<'_>> {
-    let (i, _) = tag("ustar\0")(input)?;
-    parse_ustar00(i)
-}
-
-/*
- * GNU tar archive header parsing
- */
-
-fn parse_gnu0(i: &[u8]) -> IResult<&[u8], ExtraHeader<'_>> {
-    let (i, _) = tag(" \0")(i)?;
-    let (i, uname) = parse_str32(i)?;
-    let (i, gname) = parse_str32(i)?;
-    let (i, devmajor) = parse_octal8(i)?;
-    let (i, devminor) = parse_octal8(i)?;
-    let (i, extra) = parse_ustar00_extra_gnu(i)?;
-
-    let header = ExtraHeader::UStar(UStarHeader {
-        magic: "ustar ",
-        version: " ",
-        uname,
-        gname,
-        devmajor,
-        devminor,
-        extra,
-    });
-    Ok((i, header))
-}
-
-fn parse_gnu(input: &[u8]) -> IResult<&[u8], ExtraHeader<'_>> {
-    let (i, _) = tag("ustar ")(input)?;
-    parse_gnu0(i)
-}
-
-/*
- * Posix tar archive header parsing
- */
-
-fn parse_posix(i: &[u8]) -> IResult<&[u8], ExtraHeader<'_>> {
+/// Old header padding
+fn parse_old(i: &[u8]) -> IResult<&[u8], ExtraHeader<'_>> {
     map(take(255usize), |_| ExtraHeader::Padding)(i) // padding to 512
 }
 
@@ -345,7 +301,11 @@ fn parse_header(i: &[u8]) -> IResult<&[u8], PosixHeader<'_>> {
     let (i, typeflag) = parse_type_flag(i)?;
     let (i, linkname) = parse_str100(i)?;
 
-    let (i, ustar) = alt((parse_ustar, parse_gnu, parse_posix))(i)?;
+    let (i, ustar) = alt((
+        parse_ustar("ustar ", " \0", parse_extra_gnu),
+        parse_ustar("ustar\0", "00", parse_extra_posix),
+        parse_old,
+    ))(i)?;
 
     let header = PosixHeader {
         name,
@@ -362,10 +322,6 @@ fn parse_header(i: &[u8]) -> IResult<&[u8], PosixHeader<'_>> {
     Ok((i, header))
 }
 
-/*
- * Contents parsing
- */
-
 fn parse_contents(i: &[u8], size: u64) -> IResult<&[u8], &[u8]> {
     let trailing = size % 512;
     let padding = match trailing {
@@ -375,19 +331,11 @@ fn parse_contents(i: &[u8], size: u64) -> IResult<&[u8], &[u8]> {
     terminated(take(size), take(padding))(i)
 }
 
-/*
- * Tar entry header + contents parsing
- */
-
 fn parse_entry(i: &[u8]) -> IResult<&[u8], TarEntry<'_>> {
     let (i, header) = parse_header(i)?;
     let (i, contents) = parse_contents(i, header.size)?;
     Ok((i, TarEntry { header, contents }))
 }
-
-/*
- * Tar archive parsing
- */
 
 pub fn parse_tar(i: &[u8]) -> IResult<&[u8], Vec<TarEntry<'_>>> {
     let entries = fold_many0(parse_entry, Vec::new, |mut vec, e| {
@@ -398,10 +346,6 @@ pub fn parse_tar(i: &[u8]) -> IResult<&[u8], Vec<TarEntry<'_>>> {
     });
     all_consuming(entries)(i)
 }
-
-/*
- * Tests
- */
 
 #[cfg(test)]
 mod tests {
