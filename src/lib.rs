@@ -150,14 +150,14 @@ impl DirTreeBuilder {
                 .take()
                 .unwrap_or_else(|| Self::get_full_name(entry));
             match entry.header.typeflag {
-                TypeFlag::Directory => {
+                TypeFlag::Directory | TypeFlag::GnuDirectory => {
                     self.insert_dir(Path::new(name.deref()));
                 }
                 TypeFlag::NormalFile | TypeFlag::ContiguousFile => self.insert_file(
                     Path::new(name.deref()),
                     &entry.contents[..entry.header.size as usize],
                 ),
-                TypeFlag::GNULongName => {
+                TypeFlag::GnuLongName => {
                     debug_assert!(longname.is_none());
                     debug_assert!(entry.header.size > 1);
                     // SAFETY: TAR should be UTF-8

@@ -46,9 +46,12 @@ pub enum TypeFlag {
     Directory,
     Fifo,
     ContiguousFile,
-    PaxInterexchangeFormat,
-    PaxExtendedAttributes,
-    GNULongName,
+    PaxGlobal,
+    Pax,
+    GnuDirectory,
+    GnuLongLink,
+    GnuLongName,
+    GnuSparse,
     VendorSpecific,
 }
 
@@ -72,7 +75,7 @@ pub struct UStarHeader<'a> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum UStarExtraHeader<'a> {
     Posix(PosixExtraHeader<'a>),
-    Gnu(GNUExtraHeader<'a>),
+    Gnu(GnuExtraHeader<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -81,7 +84,7 @@ pub struct PosixExtraHeader<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct GNUExtraHeader<'a> {
+pub struct GnuExtraHeader<'a> {
     pub atime: u64,
     pub ctime: u64,
     pub offset: u64,
@@ -173,11 +176,14 @@ fn parse_type_flag(i: &[u8]) -> IResult<&[u8], TypeFlag> {
         b'5' => TypeFlag::Directory,
         b'6' => TypeFlag::Fifo,
         b'7' => TypeFlag::ContiguousFile,
-        b'g' => TypeFlag::PaxInterexchangeFormat,
-        b'x' => TypeFlag::PaxExtendedAttributes,
-        b'L' => TypeFlag::GNULongName,
+        b'g' => TypeFlag::PaxGlobal,
+        b'x' | b'X' => TypeFlag::Pax,
+        b'D' => TypeFlag::GnuDirectory,
+        b'K' => TypeFlag::GnuLongLink,
+        b'L' => TypeFlag::GnuLongName,
+        b'S' => TypeFlag::GnuSparse,
         b'A'..=b'Z' => TypeFlag::VendorSpecific,
-        _ => TypeFlag::NormalFile,
+        _ => return Err(nom::Err::Error(error_position!(i, ErrorKind::Fail))),
     };
     Ok((rest, flag))
 }
@@ -243,7 +249,7 @@ fn parse_ustar00_extra_gnu(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
 
     let (i, _) = parse_extra_sparses(i, isextended, add_to_vec(&mut sparses, sps))?;
 
-    let header = GNUExtraHeader {
+    let header = GnuExtraHeader {
         atime,
         ctime,
         offset,
