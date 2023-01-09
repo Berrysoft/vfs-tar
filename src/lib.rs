@@ -41,6 +41,11 @@ impl TarFS {
         Ok(Self { file, root })
     }
 
+    /// Get the reference of the inner [`Mmap`].
+    pub fn as_inner(&self) -> &Mmap {
+        &self.file
+    }
+
     /// Get the inner [`Mmap`].
     pub fn into_inner(self) -> Mmap {
         self.file
