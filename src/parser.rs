@@ -32,7 +32,6 @@ pub struct PosixHeader<'a> {
     pub ustar: ExtraHeader<'a>,
 }
 
-/* TODO: support more vendor specific */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TypeFlag {
     NormalFile,
@@ -121,10 +120,7 @@ impl_parse_str! {
     parse_str155, 155;
 }
 
-/*
- * Octal string parsing
- */
-
+/// Octal string parsing
 fn parse_octal(i: &[u8], n: usize) -> IResult<&[u8], u64> {
     let (rest, input) = take(n)(i)?;
     let (i, value) = terminated(oct_digit0, space0)(input)?;
@@ -147,10 +143,7 @@ fn parse_octal12(i: &[u8]) -> IResult<&[u8], u64> {
     parse_octal(i, 12)
 }
 
-/*
- * TypeFlag parsing
- */
-
+/// [`TypeFlag`] parsing
 fn parse_type_flag(i: &[u8]) -> IResult<&[u8], TypeFlag> {
     let (c, rest) = match i.split_first() {
         Some((c, rest)) => (c, rest),
@@ -177,10 +170,7 @@ fn parse_type_flag(i: &[u8]) -> IResult<&[u8], TypeFlag> {
     Ok((rest, flag))
 }
 
-/*
- * Sparse parsing
- */
-
+/// [`Sparse`] parsing
 fn parse_one_sparse(i: &[u8]) -> IResult<&[u8], Sparse> {
     let (i, (offset, numbytes)) = pair(parse_octal12, parse_octal12)(i)?;
     Ok((i, Sparse { offset, numbytes }))

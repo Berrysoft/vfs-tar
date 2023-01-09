@@ -19,7 +19,6 @@ use vfs::{error::VfsErrorKind, *};
 /// A readonly tar archive filesystem.
 #[derive(Debug)]
 pub struct TarFS {
-    #[allow(dead_code)]
     file: Mmap,
     root: DirTree,
 }
@@ -40,6 +39,11 @@ impl TarFS {
             .map_err(|e| VfsErrorKind::Other(e.to_string()))?;
         let root = DirTreeBuilder::default().build(&entries);
         Ok(Self { file, root })
+    }
+
+    /// Get the inner [`Mmap`].
+    pub fn into_inner(self) -> Mmap {
+        self.file
     }
 
     fn find_entry(&self, path: &str) -> Option<EntryRef> {
