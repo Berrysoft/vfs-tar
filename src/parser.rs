@@ -7,7 +7,7 @@ use nom::bytes::complete::{tag, take, take_until};
 use nom::character::complete::{digit1, oct_digit0, space0};
 use nom::combinator::{all_consuming, iterator, map, map_parser, map_res};
 use nom::error::ErrorKind;
-use nom::multi::{count, many0};
+use nom::multi::many0;
 use nom::sequence::{pair, terminated};
 use nom::*;
 use std::collections::HashMap;
@@ -48,6 +48,7 @@ pub enum TypeFlag {
     GnuLongLink,
     GnuLongName,
     GnuSparse,
+    GnuVolumeHeader,
     VendorSpecific,
 }
 
@@ -164,6 +165,7 @@ fn parse_type_flag(i: &[u8]) -> IResult<&[u8], TypeFlag> {
         b'K' => TypeFlag::GnuLongLink,
         b'L' => TypeFlag::GnuLongName,
         b'S' => TypeFlag::GnuSparse,
+        b'V' => TypeFlag::GnuVolumeHeader,
         b'A'..=b'Z' => TypeFlag::VendorSpecific,
         _ => return Err(nom::Err::Error(error_position!(i, ErrorKind::Fail))),
     };
@@ -174,6 +176,16 @@ fn parse_type_flag(i: &[u8]) -> IResult<&[u8], TypeFlag> {
 fn parse_sparse(i: &[u8]) -> IResult<&[u8], Sparse> {
     let (i, (offset, numbytes)) = pair(parse_octal12, parse_octal12)(i)?;
     Ok((i, Sparse { offset, numbytes }))
+}
+
+fn parse_sparses(i: &[u8], count: usize) -> IResult<&[u8], Vec<Sparse>> {
+    let mut it = iterator(i, parse_sparse);
+    let res = it
+        .take(count)
+        .filter(|s| !(s.offset == 0 && s.numbytes == 0))
+        .collect();
+    let (i, ()) = it.finish()?;
+    Ok((i, res))
 }
 
 fn add_to_vec(sparses: &mut Vec<Sparse>, extra: Vec<Sparse>) -> &mut Vec<Sparse> {
@@ -187,7 +199,7 @@ fn parse_extra_sparses<'a, 'b>(
     sparses: &'b mut Vec<Sparse>,
 ) -> IResult<&'a [u8], &'b mut Vec<Sparse>> {
     if isextended {
-        let (i, sps) = count(parse_sparse, 21)(i)?;
+        let (i, sps) = parse_sparses(i, 21)?;
         let (i, extended) = parse_bool(i)?;
         let (i, _) = take(7usize)(i)?; // padding to 512
 
@@ -213,7 +225,7 @@ fn parse_extra_gnu(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
     let (i, offset) = parse_octal12(i)?;
     let (i, _) = take(4usize)(i)?; // longnames
     let (i, _) = take(1usize)(i)?;
-    let (i, sps) = count(parse_sparse, 4)(i)?;
+    let (i, sps) = parse_sparses(i, 4)?;
     let (i, isextended) = parse_bool(i)?;
     let (i, realsize) = parse_octal12(i)?;
     let (i, _) = take(17usize)(i)?; // padding to 512
@@ -375,6 +387,12 @@ mod tests {
         let s: &[u8] = b"foobar\0\0\0\0baz";
         let baz: &[u8] = b"baz";
         assert_eq!(parse_str(10)(s), Ok((baz, "foobar")));
+    }
+
+    #[test]
+    fn parse_sparses_test() {
+        let sparses = std::iter::repeat(0u8).take(12 * 2 * 4).collect::<Vec<_>>();
+        assert_eq!(parse_sparses(&sparses, 4), Ok((EMPTY, vec![])));
     }
 
     #[test]

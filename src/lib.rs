@@ -175,15 +175,18 @@ impl DirTreeBuilder {
     pub fn build(mut self, entries: &[TarEntry<'static>]) -> DirTree {
         for entry in entries {
             match entry.header.typeflag {
+                // Don't handle directory diff.
                 TypeFlag::Directory | TypeFlag::GnuDirectory => {
                     let name = self.get_name(entry);
                     self.insert_dir(Path::new(name.deref()));
                 }
+                // Treat links as redirects.
                 TypeFlag::HardLink | TypeFlag::SymbolicLink => {
                     let name = self.get_name(entry);
                     let target = self.longlink.take().unwrap_or(entry.header.linkname);
                     self.insert_link(Path::new(name.deref()), target)
                 }
+                // Handle long name.
                 TypeFlag::GnuLongName => {
                     debug_assert!(entry.header.size > 1);
                     if let Ok((_, name)) = parse_long_name(entry.contents) {
@@ -191,6 +194,7 @@ impl DirTreeBuilder {
                         self.longname = Some(Cow::Borrowed(name));
                     }
                 }
+                // Handle long link name.
                 TypeFlag::GnuLongLink => {
                     debug_assert!(entry.header.size > 1);
                     if let Ok((_, target)) = parse_long_name(entry.contents) {
@@ -198,6 +202,7 @@ impl DirTreeBuilder {
                         self.longlink = Some(target);
                     }
                 }
+                // Handle PAX.
                 TypeFlag::Pax => {
                     if let Ok((_, pax)) = parse_pax(entry.contents) {
                         if let Some(name) = pax.get("path") {
@@ -215,8 +220,8 @@ impl DirTreeBuilder {
                     }
                 }
                 // The file-specific settings should not appear in global PAX.
-                // And we don't handle sparse.
-                TypeFlag::PaxGlobal | TypeFlag::GnuSparse => {}
+                // GNU volume header should be ignored.
+                TypeFlag::PaxGlobal | TypeFlag::GnuVolumeHeader => {}
                 // A POSIX-compliant impl must treat any unrecognized typeflag as normal file.
                 _ => {
                     let name = self.get_name(entry);
