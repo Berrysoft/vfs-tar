@@ -5,9 +5,9 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take, take_until};
 use nom::character::complete::{digit1, oct_digit0, space0};
-use nom::combinator::{all_consuming, map, map_parser, map_res};
+use nom::combinator::{all_consuming, iterator, map, map_parser, map_res};
 use nom::error::ErrorKind;
-use nom::multi::fold_many0;
+use nom::multi::{count, many0};
 use nom::sequence::{pair, terminated};
 use nom::*;
 use std::collections::HashMap;
@@ -171,21 +171,9 @@ fn parse_type_flag(i: &[u8]) -> IResult<&[u8], TypeFlag> {
 }
 
 /// [`Sparse`] parsing
-fn parse_one_sparse(i: &[u8]) -> IResult<&[u8], Sparse> {
+fn parse_sparse(i: &[u8]) -> IResult<&[u8], Sparse> {
     let (i, (offset, numbytes)) = pair(parse_octal12, parse_octal12)(i)?;
     Ok((i, Sparse { offset, numbytes }))
-}
-
-fn parse_sparses(mut input: &[u8], limit: usize) -> IResult<&[u8], Vec<Sparse>> {
-    let mut sparses = vec![];
-
-    for _ in 0..limit {
-        let (i, sp) = parse_one_sparse(input)?;
-        input = i;
-        sparses.push(sp);
-    }
-
-    Ok((input, sparses))
 }
 
 fn add_to_vec(sparses: &mut Vec<Sparse>, extra: Vec<Sparse>) -> &mut Vec<Sparse> {
@@ -199,7 +187,7 @@ fn parse_extra_sparses<'a, 'b>(
     sparses: &'b mut Vec<Sparse>,
 ) -> IResult<&'a [u8], &'b mut Vec<Sparse>> {
     if isextended {
-        let (i, sps) = parse_sparses(i, 21)?;
+        let (i, sps) = count(parse_sparse, 21)(i)?;
         let (i, extended) = parse_bool(i)?;
         let (i, _) = take(7usize)(i)?; // padding to 512
 
@@ -225,7 +213,7 @@ fn parse_extra_gnu(i: &[u8]) -> IResult<&[u8], UStarExtraHeader<'_>> {
     let (i, offset) = parse_octal12(i)?;
     let (i, _) = take(4usize)(i)?; // longnames
     let (i, _) = take(1usize)(i)?;
-    let (i, sps) = parse_sparses(i, 4)?;
+    let (i, sps) = count(parse_sparse, 4)(i)?;
     let (i, isextended) = parse_bool(i)?;
     let (i, realsize) = parse_octal12(i)?;
     let (i, _) = take(17usize)(i)?; // padding to 512
@@ -322,13 +310,7 @@ fn parse_entry(i: &[u8]) -> IResult<&[u8], TarEntry<'_>> {
 }
 
 pub fn parse_tar(i: &[u8]) -> IResult<&[u8], Vec<TarEntry<'_>>> {
-    let entries = fold_many0(parse_entry, Vec::new, |mut vec, e| {
-        if !e.header.name.is_empty() {
-            vec.push(e)
-        }
-        vec
-    });
-    all_consuming(entries)(i)
+    all_consuming(many0(parse_entry))(i)
 }
 
 pub fn parse_long_name(i: &[u8]) -> IResult<&[u8], &str> {
@@ -349,11 +331,10 @@ fn parse_pax_item(i: &[u8]) -> IResult<&[u8], (&str, &str)> {
 }
 
 pub fn parse_pax(i: &[u8]) -> IResult<&[u8], HashMap<&str, &str>> {
-    let items = fold_many0(parse_pax_item, HashMap::new, |mut map, (key, value)| {
-        map.insert(key, value);
-        map
-    });
-    all_consuming(items)(i)
+    let mut it = iterator(i, parse_pax_item);
+    let map = it.collect();
+    let (i, ()) = it.finish()?;
+    Ok((i, map))
 }
 
 #[cfg(test)]
