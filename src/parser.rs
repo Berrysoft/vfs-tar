@@ -318,12 +318,9 @@ pub fn parse_long_name(i: &[u8]) -> IResult<&[u8], &str> {
 }
 
 fn parse_pax_item(i: &[u8]) -> IResult<&[u8], (&str, &str)> {
-    let (i, len) = map_res(digit1, std::str::from_utf8)(i)?;
-    let (i, _) = tag(" ")(i)?;
-    let (i, key) = map_res(take_until("="), std::str::from_utf8)(i)?;
-    let (i, _) = tag("=")(i)?;
-    let (i, value) = map_res(take_until("\n"), std::str::from_utf8)(i)?;
-    let (i, _) = tag("\n")(i)?;
+    let (i, len) = map_res(terminated(digit1, tag(" ")), std::str::from_utf8)(i)?;
+    let (i, key) = map_res(terminated(take_until("="), tag("=")), std::str::from_utf8)(i)?;
+    let (i, value) = map_res(terminated(take_until("\n"), tag("\n")), std::str::from_utf8)(i)?;
     if let Ok(len_usize) = len.parse::<usize>() {
         debug_assert_eq!(len_usize, len.len() + key.len() + value.len() + 3);
     }
