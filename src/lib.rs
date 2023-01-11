@@ -179,11 +179,6 @@ impl DirTreeBuilder {
                     let name = self.get_name(entry);
                     self.insert_dir(Path::new(name.deref()));
                 }
-                TypeFlag::NormalFile | TypeFlag::ContiguousFile => {
-                    let name = self.get_name(entry);
-                    let size = self.realsize.take().unwrap_or(entry.header.size) as usize;
-                    self.insert_file(Path::new(name.deref()), &entry.contents[..size])
-                }
                 TypeFlag::HardLink | TypeFlag::SymbolicLink => {
                     let name = self.get_name(entry);
                     let target = self.longlink.take().unwrap_or(entry.header.linkname);
@@ -219,7 +214,15 @@ impl DirTreeBuilder {
                         }
                     }
                 }
-                _ => {}
+                // The file-specific settings should not appear in global PAX.
+                // And we don't handle sparse.
+                TypeFlag::PaxGlobal | TypeFlag::GnuSparse => {}
+                // A POSIX-compliant impl must treat any unrecognized typeflag as normal file.
+                _ => {
+                    let name = self.get_name(entry);
+                    let size = self.realsize.take().unwrap_or(entry.header.size) as usize;
+                    self.insert_file(Path::new(name.deref()), &entry.contents[..size])
+                }
             }
         }
         self.root
