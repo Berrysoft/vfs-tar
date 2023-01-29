@@ -104,15 +104,20 @@ impl TarFS {
 
 impl FileSystem for TarFS {
     fn read_dir(&self, path: &str) -> VfsResult<Box<dyn Iterator<Item = String> + Send>> {
-        match self.find_entry(path) {
-            Some(EntryRef::Directory(dir)) => Ok(Box::new(
-                dir.keys()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-                    .into_iter(),
-            )),
-            _ => Err(VfsErrorKind::FileNotFound.into()),
-        }
+        let dir = if path.is_empty() {
+            &self.root
+        } else {
+            match self.find_entry(path) {
+                Some(EntryRef::Directory(dir)) => dir,
+                _ => return Err(VfsErrorKind::FileNotFound.into()),
+            }
+        };
+        Ok(Box::new(
+            dir.keys()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .into_iter(),
+        ))
     }
 
     fn create_dir(&self, _path: &str) -> VfsResult<()> {
