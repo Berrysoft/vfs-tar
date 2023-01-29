@@ -2,10 +2,7 @@
 
 #![warn(missing_docs)]
 
-mod parser;
-
 use memmap2::{Mmap, MmapOptions};
-use parser::*;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -14,6 +11,7 @@ use std::{
     ops::Deref,
     path::{Iter, Path},
 };
+use tar_parser2::*;
 use vfs::{error::VfsErrorKind, *};
 
 /// A readonly tar archive filesystem.
@@ -303,7 +301,7 @@ mod test {
     #[test]
     fn basic() {
         let file = tempfile().unwrap();
-        let mut archive = tar_rs::Builder::new(file);
+        let mut archive = tar::Builder::new(file);
         archive.append_dir_all("src", "src").unwrap();
         let file = archive.into_inner().unwrap();
 
@@ -317,7 +315,7 @@ mod test {
             .map(|p| p.filename())
             .collect::<Vec<_>>();
         files.sort();
-        assert_eq!(&files, &["lib.rs", "parser.rs"]);
+        assert_eq!(&files, &["lib.rs"]);
 
         let mut buffer = String::new();
         root.join("src/lib.rs")
@@ -335,7 +333,7 @@ mod test {
         let name = "a".repeat(1024);
 
         let file = tempfile().unwrap();
-        let mut archive = tar_rs::Builder::new(file);
+        let mut archive = tar::Builder::new(file);
         archive.append_path_with_name("src/lib.rs", &name).unwrap();
         let file = archive.into_inner().unwrap();
 
@@ -359,11 +357,11 @@ mod test {
         let link_name = "b".repeat(1024);
 
         let file = tempfile().unwrap();
-        let mut archive = tar_rs::Builder::new(file);
+        let mut archive = tar::Builder::new(file);
         archive.append_path_with_name("src/lib.rs", &name).unwrap();
         {
-            let mut header = tar_rs::Header::new_gnu();
-            header.set_entry_type(tar_rs::EntryType::Symlink);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Symlink);
             archive.append_link(&mut header, &link_name, &name).unwrap();
         }
         let file = archive.into_inner().unwrap();
@@ -388,17 +386,17 @@ mod test {
         let link_name = format!("{}/{}", "c".repeat(80), "d".repeat(80));
 
         let file = tempfile().unwrap();
-        let mut archive = tar_rs::Builder::new(file);
+        let mut archive = tar::Builder::new(file);
         {
-            let mut header = tar_rs::Header::new_ustar();
+            let mut header = tar::Header::new_ustar();
             let file = std::fs::File::open("src/lib.rs").unwrap();
             let size = file.metadata().unwrap().len();
             header.set_size(size);
             archive.append_data(&mut header, &name, file).unwrap();
         }
         {
-            let mut header = tar_rs::Header::new_ustar();
-            header.set_entry_type(tar_rs::EntryType::Symlink);
+            let mut header = tar::Header::new_ustar();
+            header.set_entry_type(tar::EntryType::Symlink);
             archive.append_link(&mut header, &link_name, &name).unwrap();
         }
         let file = archive.into_inner().unwrap();
