@@ -49,11 +49,12 @@ impl TarFS {
         self.file
     }
 
-    fn find_entry(&self, mut path: &str) -> Option<EntryRef> {
+    fn find_entry(&self, path: &str) -> Option<EntryRef> {
+        let mut path: Cow<Path> = strip_path(path).into();
         loop {
-            let res = Self::find_entry_impl(&self.root, strip_path(path).iter());
+            let res = Self::find_entry_impl(&self.root, path.iter());
             if let Some(EntryRef::Link(p)) = res {
-                path = p;
+                path = Self::read_link(path, p);
             } else {
                 return res;
             }
@@ -79,6 +80,24 @@ impl TarFS {
             }
         } else {
             None
+        }
+    }
+
+    fn read_link<'a>(path: Cow<Path>, target: &'a str) -> Cow<'a, Path> {
+        if let Some(target) = target.strip_prefix('/') {
+            Path::new(target).into()
+        } else {
+            let mut path = path.into_owned();
+            path.pop();
+            let target_components = Path::new(target).iter();
+            for c in target_components {
+                if c == ".." {
+                    path.pop();
+                } else {
+                    path.push(c);
+                }
+            }
+            path.into()
         }
     }
 }
@@ -397,7 +416,9 @@ mod test {
         {
             let mut header = tar::Header::new_ustar();
             header.set_entry_type(tar::EntryType::Symlink);
-            archive.append_link(&mut header, &link_name, &name).unwrap();
+            archive
+                .append_link(&mut header, &link_name, format!("../{name}"))
+                .unwrap();
         }
         let file = archive.into_inner().unwrap();
 
