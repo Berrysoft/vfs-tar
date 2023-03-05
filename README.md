@@ -7,4 +7,5 @@ Internally it uses [memmap2](https://lib.rs/crates/memmap2) and [tar-parser2](ht
 - [x] Handle GNU long name.
 - [x] Handle PAX.
 - [x] Handle links.
+- [x] Calculate checksum.
 - [ ] Make file system writable(?)
