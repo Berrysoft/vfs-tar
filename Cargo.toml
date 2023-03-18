@@ -1,6 +1,6 @@
 [package]
 name = "vfs-tar"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["Berrysoft <Strawberry_Str@hotmail.com"]
 categories = ["filesystem"]
@@ -11,7 +11,7 @@ readme = "README.md"
 repository = "https://github.com/Berrysoft/vfs-tar"
 
 [dependencies]
-tar-parser2 = "0.8"
+tar-parser2 = "0.9"
 memmap2 = "0.5"
 vfs = "0.9"
 
