@@ -2,10 +2,12 @@
 
 #![warn(missing_docs)]
 
-use memmap2::{Mmap, MmapOptions};
+use stable_deref_trait::StableDeref;
+#[allow(unused_imports)]
 use std::{
     borrow::Cow,
     collections::HashMap,
+    fmt::Debug,
     fs::File,
     io::{Cursor, Write},
     ops::Deref,
@@ -16,37 +18,20 @@ use vfs::{error::VfsErrorKind, *};
 
 /// A readonly tar archive filesystem.
 #[derive(Debug)]
-pub struct TarFS {
-    file: Mmap,
+pub struct TarFS<F: StableDeref<Target = [u8]>> {
+    #[allow(dead_code)]
+    file: F,
     root: DirTree,
 }
 
-impl TarFS {
-    /// Create [`TarFS`] from the archive path.
-    pub fn new(p: impl AsRef<Path>) -> VfsResult<Self> {
-        Self::from_std_file(&File::open(p)?)
-    }
-
-    /// Create [`TarFS`] from [`File`].
-    /// Note that the filesystem is still valid after the [`File`] being dropped.
-    pub fn from_std_file(f: &File) -> VfsResult<Self> {
-        // SAFETY: mmap with COW
-        let file = unsafe { MmapOptions::new().map_copy_read_only(f) }?;
+impl<F: StableDeref<Target = [u8]>> TarFS<F> {
+    /// Create [`TarFS`] from a specified file or buffer.
+    pub fn new(file: F) -> VfsResult<Self> {
         // SAFETY: the entries won't live longer than mmap
         let (_, entries) = parse_tar(unsafe { &*(file.deref() as *const [u8]) })
             .map_err(|e| VfsErrorKind::Other(e.to_string()))?;
         let root = DirTreeBuilder::default().build(&entries);
         Ok(Self { file, root })
-    }
-
-    /// Get the reference of the inner [`Mmap`].
-    pub fn as_inner(&self) -> &Mmap {
-        &self.file
-    }
-
-    /// Get the inner [`Mmap`].
-    pub fn into_inner(self) -> Mmap {
-        self.file
     }
 
     fn find_entry(&self, path: &str) -> Option<EntryRef> {
@@ -102,7 +87,36 @@ impl TarFS {
     }
 }
 
-impl FileSystem for TarFS {
+#[cfg(feature = "mmap")]
+use memmap2::{Mmap, MmapOptions};
+
+#[cfg(feature = "mmap")]
+impl TarFS<Mmap> {
+    /// Create [`TarFS`] from the archive path.
+    pub fn new_mmap(p: impl AsRef<Path>) -> VfsResult<Self> {
+        Self::from_std_file(&File::open(p)?)
+    }
+
+    /// Create [`TarFS`] from [`File`].
+    /// Note that the filesystem is still valid after the [`File`] being dropped.
+    pub fn from_std_file(f: &File) -> VfsResult<Self> {
+        // SAFETY: mmap with COW
+        let file = unsafe { MmapOptions::new().map_copy_read_only(f) }?;
+        TarFS::new(file)
+    }
+
+    /// Get the reference of the inner [`Mmap`].
+    pub fn as_inner(&self) -> &Mmap {
+        &self.file
+    }
+
+    /// Get the inner [`Mmap`].
+    pub fn into_inner(self) -> Mmap {
+        self.file
+    }
+}
+
+impl<F: StableDeref<Target = [u8]> + Debug + Send + Sync + 'static> FileSystem for TarFS<F> {
     fn read_dir(&self, path: &str) -> VfsResult<Box<dyn Iterator<Item = String> + Send>> {
         let dir = if path.is_empty() {
             &self.root

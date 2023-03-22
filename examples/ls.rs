@@ -3,7 +3,7 @@ use vfs_tar::TarFS;
 
 fn main() {
     let path = std::env::args_os().nth(1).unwrap();
-    let root: VfsPath = TarFS::new(path).unwrap().into();
+    let root: VfsPath = TarFS::new_mmap(path).unwrap().into();
     read_dir(&root);
 }
 
