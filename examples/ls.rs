@@ -14,10 +14,13 @@ fn read_dir(p: &VfsPath) {
     }
     println!("D {dir_name}");
     for entry in p.read_dir().unwrap() {
-        let metadata = entry.metadata().unwrap();
-        match metadata.file_type {
-            VfsFileType::Directory => read_dir(&entry),
-            VfsFileType::File => println!("F {} {}", entry.as_str(), metadata.len),
+        if let Ok(metadata) = entry.metadata() {
+            match metadata.file_type {
+                VfsFileType::Directory => read_dir(&entry),
+                VfsFileType::File => println!("F {} {}", entry.as_str(), metadata.len),
+            }
+        } else {
+            println!("E {}", entry.as_str());
         }
     }
 }
