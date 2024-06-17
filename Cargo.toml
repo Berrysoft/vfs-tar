@@ -13,7 +13,7 @@ repository = "https://github.com/Berrysoft/vfs-tar"
 [dependencies]
 tar-parser2 = "0.9"
 stable_deref_trait = "1.2"
-vfs = "0.10"
+vfs = "0.12"
 memmap2 = { version = "0.9", optional = true, features = [
     "stable_deref_trait",
 ] }
