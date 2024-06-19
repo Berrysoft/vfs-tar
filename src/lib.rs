@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 use stable_deref_trait::StableDeref;
+use std::time::SystemTime;
 #[allow(unused_imports)]
 use std::{
     borrow::Cow,
@@ -145,27 +146,37 @@ impl<F: StableDeref<Target = [u8]> + Debug + Send + Sync + 'static> FileSystem f
         }
     }
 
-    fn create_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send>> {
+    fn create_file(&self, _path: &str) -> VfsResult<Box<dyn SeekAndWrite + Send>> {
         Err(VfsErrorKind::NotSupported.into())
     }
 
-    fn append_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send>> {
+    fn append_file(&self, _path: &str) -> VfsResult<Box<dyn SeekAndWrite + Send>> {
         Err(VfsErrorKind::NotSupported.into())
     }
 
     fn metadata(&self, path: &str) -> VfsResult<VfsMetadata> {
         match self.find_entry(path) {
-            Some(e) => match e {
-                EntryRef::File(buf) => Ok(VfsMetadata {
-                    file_type: VfsFileType::File,
-                    len: buf.len() as u64,
-                }),
-                EntryRef::Directory(_) => Ok(VfsMetadata {
-                    file_type: VfsFileType::Directory,
-                    len: 0,
-                }),
-                EntryRef::Link(_) => unreachable!(),
-            },
+            Some(e) => {
+                //FIXME get mtime from Header also ctime atime from Pax Headers
+                let modified = Some(SystemTime::UNIX_EPOCH);
+                match e {
+                    EntryRef::File(buf) => Ok(VfsMetadata {
+                        file_type: VfsFileType::File,
+                        len: buf.len() as u64,
+                        created: None,
+                        modified,
+                        accessed: None,
+                    }),
+                    EntryRef::Directory(_) => Ok(VfsMetadata {
+                        file_type: VfsFileType::Directory,
+                        len: 0,
+                        created: None,
+                        modified,
+                        accessed: None,
+                    }),
+                    EntryRef::Link(_) => unreachable!(),
+                }
+            }
             None => Err(VfsErrorKind::FileNotFound.into()),
         }
     }
