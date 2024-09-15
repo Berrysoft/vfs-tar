@@ -1,6 +1,6 @@
 [package]
 name = "vfs-tar"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 authors = ["Berrysoft <Strawberry_Str@hotmail.com"]
 categories = ["filesystem"]
